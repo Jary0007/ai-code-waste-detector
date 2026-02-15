@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,6 +16,57 @@ def _entity_reference(entity_by_id: dict[str, CodeEntity], entity_id: str) -> st
     if entity is None:
         return entity_id
     return f"{entity.file_path}:{entity.lineno}"
+
+
+def build_json_report(
+    result: AnalysisResult,
+    repo_path: str | Path,
+    time_window_days: int,
+    history_context: dict[str, object] | None = None,
+) -> dict[str, object]:
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+    entity_by_id = {entity.entity_id: entity for entity in result.entities}
+
+    ai_signals = [asdict(signal) for signal in result.ai_signals]
+    duplication_pairs = [asdict(pair) for pair in result.duplication_pairs]
+    findings = [asdict(finding) for finding in result.findings]
+
+    runtime_evidence = {
+        entity_id: asdict(evidence) for entity_id, evidence in result.runtime_evidence.items()
+    }
+    git_evidence = {
+        entity_id: asdict(evidence) for entity_id, evidence in result.git_evidence.items()
+    }
+
+    entities = []
+    for entity in result.entities:
+        row = asdict(entity)
+        row["reference"] = _entity_reference(entity_by_id, entity.entity_id)
+        entities.append(row)
+
+    return {
+        "meta": {
+            "repository": str(Path(repo_path).resolve()),
+            "generated_at": generated_at,
+            "runtime_window_days": time_window_days,
+        },
+        "summary": dict(result.summary),
+        "trend": history_context.get("trend") if history_context else None,
+        "previous_run": (
+            {
+                "run_id": history_context.get("previous_run_id"),
+                "scanned_at": history_context.get("previous_scanned_at"),
+            }
+            if history_context and history_context.get("previous_run_id")
+            else None
+        ),
+        "entities": entities,
+        "ai_signals": ai_signals,
+        "duplication_pairs": duplication_pairs,
+        "runtime_evidence": runtime_evidence,
+        "git_evidence": git_evidence,
+        "findings": findings,
+    }
 
 
 def build_markdown_report(

@@ -99,6 +99,15 @@ py -m ai_code_waste_detector.cli --repo . --disable-history
 py -m unittest discover -s tests -v
 ```
 
+7. JSON output for automation (default enabled):
+
+```powershell
+py -m ai_code_waste_detector.cli `
+  --repo . `
+  --output reports/diagnostic.md `
+  --json-output reports/diagnostic.json
+```
+
 ## Runtime evidence format
 
 Supported JSON shapes:
@@ -140,3 +149,9 @@ Supported JSON shapes:
 - test directories are excluded by default (use `--include-tests` to include them)
 - script parsing is pattern-based (not a full JS/TS AST), so edge cases may be skipped
 - git provenance depends on local git history availability and blame quality
+
+## CI
+
+- GitHub Actions workflow at `.github/workflows/diagnostic.yml`
+- Runs tests + diagnostic scan on `push` and `pull_request` to `main`
+- Uploads `reports/ci-diagnostic.md` and `reports/ci-diagnostic.json` as artifacts

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from .engine import analyze_repo
 from .history import record_run
-from .report import build_markdown_report
+from .report import build_json_report, build_markdown_report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -88,6 +89,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="reports/diagnostic.md",
         help="Markdown output path (default: reports/diagnostic.md).",
     )
+    parser.add_argument(
+        "--json-output",
+        default="reports/diagnostic.json",
+        help="JSON output path (default: reports/diagnostic.json).",
+    )
     return parser
 
 
@@ -132,10 +138,22 @@ def main(argv: list[str] | None = None) -> int:
         currency=args.currency,
         history_context=history_context,
     )
+    json_payload = build_json_report(
+        result=result,
+        repo_path=args.repo,
+        time_window_days=args.time_window_days,
+        history_context=history_context,
+    )
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(markdown, encoding="utf-8")
+    json_output_path = Path(args.json_output)
+    json_output_path.parent.mkdir(parents=True, exist_ok=True)
+    json_output_path.write_text(
+        json.dumps(json_payload, indent=2, sort_keys=False),
+        encoding="utf-8",
+    )
 
     summary = result.summary
     print(f"Functions scanned: {summary['functions_scanned']}")
@@ -152,6 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     if history_context is not None:
         print(f"History run id: {history_context['run_id']}")
     print(f"Report written: {output_path.resolve()}")
+    print(f"JSON report written: {json_output_path.resolve()}")
     return 0
 
 

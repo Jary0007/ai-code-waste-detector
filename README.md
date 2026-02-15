@@ -2,6 +2,18 @@
 
 Read-only diagnostic tool for finding AI-generated code waste signals with evidence.
 
+## What This Project Is
+
+It is a read-only diagnostic tool that finds likely AI-code waste in a repo. Think of it as an X-ray for codebases: it shows code that may exist without enough value.
+
+## What It Does (Basic Flow)
+
+- Scans source files (`.py`, `.js`, `.ts`, etc.) and extracts functions.
+- Scores functions for probable AI-generated patterns (heuristic, not certainty).
+- Detects high-overlap duplicate logic.
+- Reads optional runtime usage data (`runtime.json`) to see what is actually used vs unused.
+- Estimates coarse annual avoidable cost from duplicate active paths.
+
 This MVP does **not** refactor, rewrite, or mutate source code. It only reports:
 
 - probable AI-generated code (heuristic, confidence-based)

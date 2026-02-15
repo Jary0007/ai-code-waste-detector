@@ -18,6 +18,37 @@ This MVP does **not** refactor, rewrite, or mutate source code. It only reports:
 - silence when confidence is low
 - no auto-fix behavior
 
+## Architecture Flow
+
+```mermaid
+flowchart TD
+    A[Run command in local terminal<br/>py -m ai_code_waste_detector.cli ...] --> B[Load CLI options]
+
+    B --> C[Scan local repo path]
+    C --> C1[Extract functions from Python and JS/TS]
+    C1 --> D[Code Entities]
+
+    D --> E[Collect git provenance locally<br/>git log / git blame]
+    D --> F[Compute AI probability signals]
+    E --> F
+
+    D --> G[Detect semantic duplication]
+    B --> H{Runtime file provided?}
+    H -- Yes --> I[Load runtime JSON and map invocations]
+    H -- No --> J[Mark runtime as unknown]
+
+    F --> K[Synthesize diagnostic findings]
+    G --> K
+    I --> K
+    J --> K
+
+    K --> L[Build summary metrics]
+    L --> M[Write run history to local SQLite<br/>.waste_detector/history.db]
+    M --> N[Compute trend vs previous run]
+    N --> O[Generate markdown report]
+    O --> P[Save report locally<br/>reports/*.md]
+```
+
 ## Quick start
 
 1. Run analysis on a repo:

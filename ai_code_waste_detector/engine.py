@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .duplication import detect_duplication_pairs
+from .git_provenance import collect_git_evidence
 from .models import AnalysisResult, Finding
 from .provenance import detect_ai_signals
 from .runtime import load_runtime_index, map_runtime_evidence
@@ -17,14 +18,24 @@ def analyze_repo(
     ai_threshold: float = 0.65,
     duplication_threshold: float = 0.9,
     min_duplicate_body_statements: int = 3,
+    min_duplicate_signature_chars: int = 160,
     include_tests: bool = False,
+    git_provenance_enabled: bool = True,
 ) -> AnalysisResult:
     entities = extract_entities(repo_path, include_tests=include_tests)
-    ai_signals = detect_ai_signals(entities, threshold=ai_threshold)
+    git_evidence = (
+        collect_git_evidence(repo_path, entities) if git_provenance_enabled else {}
+    )
+    ai_signals = detect_ai_signals(
+        entities,
+        threshold=ai_threshold,
+        git_evidence_by_entity=git_evidence,
+    )
     duplication_pairs = detect_duplication_pairs(
         entities,
         high_threshold=duplication_threshold,
         min_body_statements=min_duplicate_body_statements,
+        min_signature_chars=min_duplicate_signature_chars,
     )
 
     runtime_index = load_runtime_index(runtime_path)
@@ -41,6 +52,11 @@ def analyze_repo(
     probable_ai_zero_invocations = 0
     runtime_zero_invocations = 0
     runtime_unknown = 0
+    git_evidence_available = sum(
+        1
+        for entity in entities
+        if entity.entity_id in git_evidence and git_evidence[entity.entity_id].available
+    )
 
     for entity in entities:
         runtime = runtime_evidence[entity.entity_id]
@@ -134,11 +150,13 @@ def analyze_repo(
         "runtime_unknown": runtime_unknown,
         "probable_ai_zero_invocations": probable_ai_zero_invocations,
         "estimated_annualized_avoidable_runtime_cost": round(annualized_cost_total, 2),
+        "git_evidence_available": git_evidence_available,
     }
 
     return AnalysisResult(
         entities=entities,
         ai_signals=ai_signals,
+        git_evidence=git_evidence,
         duplication_pairs=duplication_pairs,
         runtime_evidence=runtime_evidence,
         findings=findings,

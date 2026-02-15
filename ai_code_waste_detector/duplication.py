@@ -106,7 +106,9 @@ def _first_function_node(source: str) -> ast.FunctionDef | ast.AsyncFunctionDef 
 
 
 def _normalized_signature(
-    entity: CodeEntity, min_body_statements: int
+    entity: CodeEntity,
+    min_body_statements: int,
+    min_signature_chars: int,
 ) -> str | None:
     function_node = _first_function_node(entity.source)
     if function_node is not None:
@@ -116,12 +118,23 @@ def _normalized_signature(
         canonical = copy.deepcopy(function_node)
         transformed = _CanonicalizeTransformer().visit(canonical)
         ast.fix_missing_locations(transformed)
-        return ast.dump(transformed, include_attributes=False)
+        signature = ast.dump(transformed, include_attributes=False)
+        if len(signature) < min_signature_chars:
+            return None
+        return signature
 
-    return _normalized_script_signature(entity.source, min_body_statements)
+    return _normalized_script_signature(
+        entity.source,
+        min_body_statements=min_body_statements,
+        min_signature_chars=min_signature_chars,
+    )
 
 
-def _normalized_script_signature(source: str, min_body_statements: int) -> str | None:
+def _normalized_script_signature(
+    source: str,
+    min_body_statements: int,
+    min_signature_chars: int,
+) -> str | None:
     cleaned = _SCRIPT_COMMENT_RE.sub("", source)
     statement_count = cleaned.count(";")
     statement_count += len(re.findall(r"\b(if|for|while|return|throw|switch)\b", cleaned))
@@ -139,6 +152,8 @@ def _normalized_script_signature(source: str, min_body_statements: int) -> str |
 
     normalized = _SCRIPT_IDENTIFIER_RE.sub(replace_identifier, normalized)
     normalized = re.sub(r"\s+", " ", normalized).strip()
+    if len(normalized) < min_signature_chars:
+        return None
     return normalized
 
 
@@ -148,11 +163,14 @@ def detect_duplication_pairs(
     medium_threshold: float = 0.75,
     include_medium: bool = False,
     min_body_statements: int = 3,
+    min_signature_chars: int = 160,
 ) -> list[DuplicationPair]:
     signatures: dict[str, str] = {}
     for entity in entities:
         signature = _normalized_signature(
-            entity, min_body_statements=min_body_statements
+            entity,
+            min_body_statements=min_body_statements,
+            min_signature_chars=min_signature_chars,
         )
         if signature:
             signatures[entity.entity_id] = signature

@@ -24,6 +24,18 @@ class AIProvenanceSignal:
 
 
 @dataclass(frozen=True)
+class GitProvenanceEvidence:
+    entity_id: str
+    available: bool
+    blame_commit_count: Optional[int] = None
+    blame_author_count: Optional[int] = None
+    line_commit_concentration: Optional[float] = None
+    last_commit_age_days: Optional[int] = None
+    file_commit_count: Optional[int] = None
+    file_author_count: Optional[int] = None
+
+
+@dataclass(frozen=True)
 class DuplicationPair:
     entity_a: str
     entity_b: str
@@ -53,6 +65,7 @@ class Finding:
 class AnalysisResult:
     entities: list[CodeEntity]
     ai_signals: list[AIProvenanceSignal]
+    git_evidence: dict[str, GitProvenanceEvidence]
     duplication_pairs: list[DuplicationPair]
     runtime_evidence: dict[str, RuntimeEvidence]
     findings: list[Finding]

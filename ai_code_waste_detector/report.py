@@ -22,6 +22,7 @@ def build_markdown_report(
     repo_path: str | Path,
     time_window_days: int,
     currency: str = "USD",
+    history_context: dict[str, object] | None = None,
 ) -> str:
     entity_by_id = {entity.entity_id: entity for entity in result.entities}
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
@@ -55,8 +56,39 @@ def build_markdown_report(
     lines.append(
         f"- Probable AI functions with zero runtime invocations: **{int(summary['probable_ai_zero_invocations'])}**"
     )
+    lines.append(
+        f"- Git provenance coverage: **{int(summary['git_evidence_available'])}**"
+    )
     lines.append(f"- Estimated annualized avoidable runtime cost: **{cost_text}**")
     lines.append("")
+
+    trend = history_context.get("trend") if history_context else None
+    previous_scanned_at = (
+        str(history_context["previous_scanned_at"])
+        if history_context and history_context.get("previous_scanned_at")
+        else None
+    )
+    if trend and previous_scanned_at:
+        lines.append("## Trend vs Previous Run")
+        lines.append(f"- Previous run: `{previous_scanned_at}`")
+        lines.append(
+            f"- Functions scanned delta: **{int(trend['functions_scanned_delta']):+d}**"
+        )
+        lines.append(
+            f"- Probable AI functions delta: **{int(trend['probable_ai_functions_delta']):+d}**"
+        )
+        lines.append(
+            "- High-confidence duplicate pairs delta: "
+            f"**{int(trend['high_confidence_duplication_pairs_delta']):+d}**"
+        )
+        lines.append(
+            f"- Runtime zero-invocation delta: **{int(trend['runtime_zero_invocations_delta']):+d}**"
+        )
+        lines.append(
+            "- Estimated annualized avoidable runtime cost delta: "
+            f"**{_currency(float(trend['estimated_annualized_avoidable_runtime_cost_delta']), currency)}**"
+        )
+        lines.append("")
 
     lines.append("## Waste Taxonomy Mapping")
     lines.append("| Category | Instances | Economic signal |")

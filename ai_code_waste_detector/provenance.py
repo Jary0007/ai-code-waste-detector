@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 import re
 
-from .models import AIProvenanceSignal, CodeEntity
+from .models import AIProvenanceSignal, CodeEntity, GitProvenanceEvidence
 
 GENERIC_VARIABLE_NAMES = {
     "data",
@@ -101,7 +101,46 @@ def _generic_return_pattern(function_node: ast.FunctionDef | ast.AsyncFunctionDe
     return last_statement.value.id.lower() in GENERIC_VARIABLE_NAMES
 
 
-def _score_entity(entity: CodeEntity, threshold: float) -> AIProvenanceSignal | None:
+def _apply_git_adjustments(
+    score: float,
+    signals: list[str],
+    git_evidence: GitProvenanceEvidence | None,
+) -> float:
+    if git_evidence is None or not git_evidence.available:
+        return score
+
+    concentration = git_evidence.line_commit_concentration or 0.0
+    blame_commit_count = git_evidence.blame_commit_count or 0
+    blame_author_count = git_evidence.blame_author_count or 0
+    last_age_days = git_evidence.last_commit_age_days or 0
+    file_commit_count = git_evidence.file_commit_count or 0
+    file_author_count = git_evidence.file_author_count or 0
+
+    if concentration >= 0.85 and blame_commit_count <= 2:
+        score += 0.1
+        signals.append("single-source commit concentration")
+    if last_age_days <= 45 and blame_commit_count <= 3:
+        score += 0.05
+        signals.append("recent introduction window")
+    if file_author_count <= 1 and file_commit_count <= 3:
+        score += 0.05
+        signals.append("low-author diversity file")
+
+    if blame_commit_count >= 6:
+        score -= 0.1
+    if blame_author_count >= 3:
+        score -= 0.1
+    if last_age_days >= 365:
+        score -= 0.05
+
+    return score
+
+
+def _score_entity(
+    entity: CodeEntity,
+    threshold: float,
+    git_evidence: GitProvenanceEvidence | None,
+) -> AIProvenanceSignal | None:
     function_node = _first_function_node(entity.source)
     score = 0.0
     signals: list[str] = []
@@ -164,7 +203,8 @@ def _score_entity(entity: CodeEntity, threshold: float) -> AIProvenanceSignal | 
             score += 0.1
             signals.append("long boilerplate flow")
 
-    score = min(round(score, 2), 0.99)
+    score = _apply_git_adjustments(score, signals, git_evidence)
+    score = min(max(round(score, 2), 0.0), 0.99)
     if score < threshold:
         return None
 
@@ -228,11 +268,21 @@ def _script_generic_return_pattern(source: str) -> bool:
 
 
 def detect_ai_signals(
-    entities: list[CodeEntity], threshold: float = 0.65
+    entities: list[CodeEntity],
+    threshold: float = 0.65,
+    git_evidence_by_entity: dict[str, GitProvenanceEvidence] | None = None,
 ) -> list[AIProvenanceSignal]:
     output: list[AIProvenanceSignal] = []
     for entity in entities:
-        signal = _score_entity(entity, threshold=threshold)
+        git_evidence = None
+        if git_evidence_by_entity is not None:
+            git_evidence = git_evidence_by_entity.get(entity.entity_id)
+
+        signal = _score_entity(
+            entity,
+            threshold=threshold,
+            git_evidence=git_evidence,
+        )
         if signal is not None:
             output.append(signal)
     return output

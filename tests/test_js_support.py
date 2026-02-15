@@ -17,6 +17,7 @@ class JsSupportTestCase(unittest.TestCase):
             time_window_days=90,
             cost_per_invocation=0.0005,
             include_tests=True,
+            git_provenance_enabled=False,
         )
 
         self.assertGreaterEqual(result.summary["functions_scanned"], 3)
@@ -25,6 +26,7 @@ class JsSupportTestCase(unittest.TestCase):
 
         # Ensure runtime mapping works with qualified names for script files.
         self.assertEqual(result.summary["runtime_zero_invocations"], 1)
+        self.assertEqual(result.summary["git_evidence_available"], 0)
 
 
 if __name__ == "__main__":

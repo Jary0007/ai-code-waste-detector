@@ -5,9 +5,11 @@ Read-only diagnostic tool for finding AI-generated code waste signals with evide
 This MVP does **not** refactor, rewrite, or mutate source code. It only reports:
 
 - probable AI-generated code (heuristic, confidence-based)
+- git-backed provenance context (optional, enabled by default)
 - high-confidence semantic duplication
 - runtime-unused paths (when runtime evidence is provided)
 - coarse annualized cost signal (optional)
+- trend delta vs previous runs (SQLite history)
 
 ## Core behavior
 
@@ -44,10 +46,23 @@ py -m ai_code_waste_detector.cli `
   --ai-threshold 0.65 `
   --dup-threshold 0.90 `
   --min-dup-body-statements 3 `
+  --min-dup-signature-chars 160 `
   --output reports/diagnostic.md
 ```
 
-4. Run tests:
+4. Disable git provenance if needed:
+
+```powershell
+py -m ai_code_waste_detector.cli --repo . --disable-git-provenance
+```
+
+5. Disable history storage if needed:
+
+```powershell
+py -m ai_code_waste_detector.cli --repo . --disable-history
+```
+
+6. Run tests:
 
 ```powershell
 py -m unittest discover -s tests -v
@@ -93,3 +108,4 @@ Supported JSON shapes:
 - runtime mapping is best-effort by `qualified_name` then `function_name`
 - test directories are excluded by default (use `--include-tests` to include them)
 - script parsing is pattern-based (not a full JS/TS AST), so edge cases may be skipped
+- git provenance depends on local git history availability and blame quality

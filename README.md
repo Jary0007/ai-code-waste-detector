@@ -88,7 +88,8 @@ Supported JSON shapes:
 
 ## Limitations
 
-- current parser target: Python (`.py`) only
+- parser targets: Python (`.py`) and script files (`.js`, `.jsx`, `.ts`, `.tsx`)
 - AI provenance is heuristic, not authorship proof
 - runtime mapping is best-effort by `qualified_name` then `function_name`
 - test directories are excluded by default (use `--include-tests` to include them)
+- script parsing is pattern-based (not a full JS/TS AST), so edge cases may be skipped

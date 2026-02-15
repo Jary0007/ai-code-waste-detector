@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 
 from .models import AIProvenanceSignal, CodeEntity
 
@@ -17,6 +18,19 @@ GENERIC_VARIABLE_NAMES = {
     "temp",
     "payload",
 }
+
+_SCRIPT_DECLARATION_RE = re.compile(
+    r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)",
+    re.MULTILINE,
+)
+_SCRIPT_STRING_RE = re.compile(
+    r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`',
+    re.MULTILINE | re.DOTALL,
+)
+_SCRIPT_COMMENT_RE = re.compile(
+    r"//.*?$|/\*.*?\*/",
+    re.MULTILINE | re.DOTALL,
+)
 
 
 def _first_function_node(source: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
@@ -89,40 +103,66 @@ def _generic_return_pattern(function_node: ast.FunctionDef | ast.AsyncFunctionDe
 
 def _score_entity(entity: CodeEntity, threshold: float) -> AIProvenanceSignal | None:
     function_node = _first_function_node(entity.source)
-    if function_node is None:
-        return None
-
     score = 0.0
     signals: list[str] = []
 
-    guard_count = _guard_clause_count(function_node)
-    if guard_count >= 3:
-        score += 0.25
-        signals.append("uniform guard clauses")
+    if function_node is not None:
+        guard_count = _guard_clause_count(function_node)
+        if guard_count >= 3:
+            score += 0.25
+            signals.append("uniform guard clauses")
 
-    variable_ratio = _variable_name_ratio(function_node)
-    if variable_ratio >= 0.6:
-        score += 0.2
-        signals.append("generic variable naming")
+        variable_ratio = _variable_name_ratio(function_node)
+        if variable_ratio >= 0.6:
+            score += 0.2
+            signals.append("generic variable naming")
 
-    defensive_density = _defensive_density(function_node)
-    if defensive_density >= 0.4 and _statement_count(function_node) >= 4:
-        score += 0.2
-        signals.append("high defensive branch density")
+        defensive_density = _defensive_density(function_node)
+        if defensive_density >= 0.4 and _statement_count(function_node) >= 4:
+            score += 0.2
+            signals.append("high defensive branch density")
 
-    if _repetitive_error_messages(function_node):
-        score += 0.15
-        signals.append("repetitive error messaging")
+        if _repetitive_error_messages(function_node):
+            score += 0.15
+            signals.append("repetitive error messaging")
 
-    if _generic_return_pattern(function_node):
-        score += 0.15
-        signals.append("generic return pipeline")
+        if _generic_return_pattern(function_node):
+            score += 0.15
+            signals.append("generic return pipeline")
 
-    if _statement_count(function_node) >= 12 and not any(
-        isinstance(node, (ast.For, ast.While, ast.Try)) for node in ast.walk(function_node)
-    ):
-        score += 0.1
-        signals.append("long boilerplate flow")
+        if _statement_count(function_node) >= 12 and not any(
+            isinstance(node, (ast.For, ast.While, ast.Try)) for node in ast.walk(function_node)
+        ):
+            score += 0.1
+            signals.append("long boilerplate flow")
+    else:
+        guard_count = _script_guard_clause_count(entity.source)
+        if guard_count >= 3:
+            score += 0.25
+            signals.append("uniform guard clauses")
+
+        variable_ratio = _script_variable_name_ratio(entity.source)
+        if variable_ratio >= 0.6:
+            score += 0.2
+            signals.append("generic variable naming")
+
+        statement_count = _script_statement_count(entity.source)
+        defensive_density = _script_defensive_density(entity.source, statement_count)
+        if defensive_density >= 0.35 and statement_count >= 4:
+            score += 0.2
+            signals.append("high defensive branch density")
+
+        if _script_repetitive_error_messages(entity.source):
+            score += 0.15
+            signals.append("repetitive error messaging")
+
+        if _script_generic_return_pattern(entity.source):
+            score += 0.15
+            signals.append("generic return pipeline")
+
+        if statement_count >= 12 and not re.search(r"\b(for|while)\b", entity.source):
+            score += 0.1
+            signals.append("long boilerplate flow")
 
     score = min(round(score, 2), 0.99)
     if score < threshold:
@@ -135,6 +175,56 @@ def _score_entity(entity: CodeEntity, threshold: float) -> AIProvenanceSignal | 
         confidence=confidence,
         signals=signals,
     )
+
+
+def _strip_script_comments(source: str) -> str:
+    return _SCRIPT_COMMENT_RE.sub("", source)
+
+
+def _script_statement_count(source: str) -> int:
+    cleaned = _strip_script_comments(source)
+    count = cleaned.count(";")
+    count += len(re.findall(r"\b(if|for|while|return|throw|switch|catch)\b", cleaned))
+    return max(count, 1)
+
+
+def _script_guard_clause_count(source: str) -> int:
+    cleaned = _strip_script_comments(source)
+    guard_matches = re.findall(
+        r"\bif\s*\([^)]*\)\s*\{[^{}]*\b(?:return|throw)\b[^{}]*\}",
+        cleaned,
+        flags=re.DOTALL,
+    )
+    return len(guard_matches)
+
+
+def _script_variable_name_ratio(source: str) -> float:
+    names = [name.lower() for name in _SCRIPT_DECLARATION_RE.findall(source)]
+    if not names:
+        return 0.0
+    generic_count = sum(1 for name in names if name in GENERIC_VARIABLE_NAMES)
+    return generic_count / len(names)
+
+
+def _script_defensive_density(source: str, statement_count: int) -> float:
+    if_count = len(re.findall(r"\bif\s*\(", source))
+    return if_count / max(statement_count, 1)
+
+
+def _script_repetitive_error_messages(source: str) -> bool:
+    strings: list[str] = []
+    for match in _SCRIPT_STRING_RE.findall(source):
+        value = match[1:-1].lower()
+        if "error" in value or "invalid" in value or "fail" in value:
+            strings.append(value)
+    return len(strings) >= 2 and len(set(strings)) <= (len(strings) // 2 + 1)
+
+
+def _script_generic_return_pattern(source: str) -> bool:
+    matches = re.findall(r"\breturn\s+([A-Za-z_$][\w$]*)\s*;", source)
+    if not matches:
+        return False
+    return matches[-1].lower() in GENERIC_VARIABLE_NAMES
 
 
 def detect_ai_signals(

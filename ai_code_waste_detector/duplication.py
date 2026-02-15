@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import re
 from difflib import SequenceMatcher
 
 from .models import CodeEntity, DuplicationPair
@@ -29,6 +30,69 @@ class _CanonicalizeTransformer(ast.NodeTransformer):
         return node
 
 
+_SCRIPT_COMMENT_RE = re.compile(r"//.*?$|/\*.*?\*/", re.MULTILINE | re.DOTALL)
+_SCRIPT_STRING_RE = re.compile(
+    r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`',
+    re.MULTILINE | re.DOTALL,
+)
+_SCRIPT_NUMBER_RE = re.compile(r"\b\d+(?:\.\d+)?\b")
+_SCRIPT_IDENTIFIER_RE = re.compile(r"\b[_$A-Za-z][_$A-Za-z0-9]*\b")
+_SCRIPT_KEYWORDS = {
+    "as",
+    "async",
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "from",
+    "function",
+    "if",
+    "implements",
+    "import",
+    "in",
+    "instanceof",
+    "interface",
+    "let",
+    "new",
+    "null",
+    "of",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "readonly",
+    "return",
+    "static",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "type",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield",
+}
+
+
 def _first_function_node(source: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
     try:
         module = ast.parse(source)
@@ -45,15 +109,37 @@ def _normalized_signature(
     entity: CodeEntity, min_body_statements: int
 ) -> str | None:
     function_node = _first_function_node(entity.source)
-    if function_node is None:
-        return None
-    if len(function_node.body) < min_body_statements:
+    if function_node is not None:
+        if len(function_node.body) < min_body_statements:
+            return None
+
+        canonical = copy.deepcopy(function_node)
+        transformed = _CanonicalizeTransformer().visit(canonical)
+        ast.fix_missing_locations(transformed)
+        return ast.dump(transformed, include_attributes=False)
+
+    return _normalized_script_signature(entity.source, min_body_statements)
+
+
+def _normalized_script_signature(source: str, min_body_statements: int) -> str | None:
+    cleaned = _SCRIPT_COMMENT_RE.sub("", source)
+    statement_count = cleaned.count(";")
+    statement_count += len(re.findall(r"\b(if|for|while|return|throw|switch)\b", cleaned))
+    if statement_count < min_body_statements:
         return None
 
-    canonical = copy.deepcopy(function_node)
-    transformed = _CanonicalizeTransformer().visit(canonical)
-    ast.fix_missing_locations(transformed)
-    return ast.dump(transformed, include_attributes=False)
+    normalized = _SCRIPT_STRING_RE.sub("STR", cleaned)
+    normalized = _SCRIPT_NUMBER_RE.sub("0", normalized)
+
+    def replace_identifier(match: re.Match[str]) -> str:
+        token = match.group(0)
+        if token in _SCRIPT_KEYWORDS:
+            return token
+        return "var"
+
+    normalized = _SCRIPT_IDENTIFIER_RE.sub(replace_identifier, normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
 
 
 def detect_duplication_pairs(
